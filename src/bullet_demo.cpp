@@ -58,6 +58,8 @@ BodyIds create_box(
 
 int main(int argc, char** argv)
 {
+  static constexpr double epsilon = 1e-3;
+
 #if 0
   // Select an OpenCL platform. This is necessary because the NVidia OpenCL
   // does not support choosing a default platform by passing NULL.
@@ -127,7 +129,7 @@ int main(int argc, char** argv)
 #endif
 
   b3Config config;
-  config.m_maxConvexBodies = 2;
+  config.m_maxConvexBodies = 3;
   config.m_maxConvexShapes = config.m_maxConvexBodies;
   config.m_maxBroadphasePairs = 16 * config.m_maxConvexBodies;
   config.m_maxBroadphasePairs = config.m_maxBroadphasePairs;
@@ -140,10 +142,15 @@ int main(int argc, char** argv)
   pipeline.setGravity(b3MakeVector3(0., 0., -9.81));
   std::cout << "Created b3GpuRigidBodyPipeline." << std::endl;
 
-  BodyIds pusher = create_box(narrow_phase, pipeline,
-    b3MakeVector3(0., 0., 0.), b3MakeVector3(0.1, 0.6, 0.2),
-    1., b3MakeVector3(0., 0., 0.05), b3Quaternion(0., 0., 0., 1.), 0);
-  std::cout << "Created pusher." << std::endl;
+  const BodyIds floor = create_box(narrow_phase, pipeline,
+    b3MakeVector3(0., 0., -0.05 - epsilon), b3MakeVector3(10., 10., 0.1),
+    10000., b3MakeVector3(0., 0., 0.), b3Quaternion(0., 0., 0., 1.), 0);
+  const BodyIds pusher = create_box(narrow_phase, pipeline,
+    b3MakeVector3(0., 0., 0.1), b3MakeVector3(0.1, 0.6, 0.2),
+    12., b3MakeVector3(-0.2, 0., 0.), b3Quaternion(0., 0., 0., 1.), 0);
+  const BodyIds pushee = create_box(narrow_phase, pipeline,
+    b3MakeVector3(0., 0., 0.1), b3MakeVector3(0.1, 0.3, 0.2),
+    6., b3MakeVector3(+0.2, 0., 0.0), b3Quaternion(0., 0., 0., 1.), 0);
 
   pipeline.writeAllInstancesToGpu();
   narrow_phase.writeAllBodiesToGpu();

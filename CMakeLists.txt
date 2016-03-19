@@ -29,6 +29,8 @@ add_executable("${PROJECT_NAME}"
   src/bullet_demo.cpp
 )
 target_link_libraries("${PROJECT_NAME}"
+  Bullet3OpenCL_clew
+  Bullet3Collision
   ${BULLET_LIBRARIES}
   ${OpenCL_LIBRARIES}
 )

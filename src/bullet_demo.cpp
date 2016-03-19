@@ -1,6 +1,7 @@
 #include <array>
 #include <iostream>
 #include <vector>
+#include <memory>
 #include <string>
 #include <CL/cl.hpp>
 #include <Bullet3OpenCL/Initialize/b3OpenCLUtils.h>
@@ -9,6 +10,7 @@
 #include <Bullet3OpenCL/BroadphaseCollision/b3GpuSapBroadphase.h>
 #include <Bullet3OpenCL/BroadphaseCollision/b3GpuParallelLinearBvhBroadphase.h>
 #include <Bullet3Collision/BroadPhaseCollision/b3DynamicBvhBroadphase.h>
+#include <Bullet3Collision/NarrowPhaseCollision/b3ConvexUtility.h>
 
 int main(int argc, char** argv)
 {
@@ -91,7 +93,81 @@ int main(int argc, char** argv)
   b3DynamicBvhBroadphase bvh_broad_phase(2 /* max convex bodies */);
   b3GpuRigidBodyPipeline pipeline(context, device, queue, &narrow_phase,
     &broad_phase, &bvh_broad_phase, config);
+  pipeline.setGravity(b3MakeVector3(0., 0., -9.81));
+
   std::cout << "Created b3GpuRigidBodyPipeline." << std::endl;
+
+  const std::vector<b3Vector3> pusher_vertices {
+    b3MakeVector3(-0.05, -0.3, -0.1),
+    b3MakeVector3(-0.05, -0.3, +0.1),
+    b3MakeVector3(-0.05, +0.3, -0.1),
+    b3MakeVector3(-0.05, +0.3, +0.1),
+    b3MakeVector3(+0.05, -0.3, -0.1),
+    b3MakeVector3(+0.05, -0.3, +0.1),
+    b3MakeVector3(+0.05, +0.3, -0.1),
+    b3MakeVector3(+0.05, +0.3, +0.1)
+  };
+  std::unique_ptr<b3ConvexUtility> pusher_convex(new b3ConvexUtility);
+  if (!pusher_convex->initializePolyhedralFeatures(
+        pusher_vertices.data(), pusher_vertices.size()))
+  {
+    std::cerr << "Failed creating pusher b3ConvexUtility." << std::endl;
+    return 1;
+  }
+  std::cout << "Created pusher b3ConvexUtility." << std::endl;
+
+  const int pusher_shape = narrow_phase.registerConvexHullShape(
+    pusher_convex.release());
+  if (pusher_shape < 0)
+  {
+    std::cerr << "Failed registering pusher shape." << std::endl;
+    return 1;
+  }
+  std::cout << "Registered pusher shape." << std::endl;
+
+  const float pusher_mass(1.f);
+  const int pusher_userdata = 1;
+  const b3Vector3 pusher_position = b3MakeVector3(0., 0., 0.05);
+  const b3Quaternion pusher_orientation(0., 0., 0., 1.);
+
+  const int pusher_physics = pipeline.registerPhysicsInstance(
+    pusher_mass, pusher_position, pusher_orientation, pusher_shape,
+    pusher_userdata, false);
+  if (pusher_physics < 0)
+  {
+    std::cerr << "Failed registering pusher physics interface." << std::endl;
+    return 1;
+  }
+  std::cout << "Registered pusher physics interface." << std::endl;
+
+  pipeline.writeAllInstancesToGpu();
+  narrow_phase.writeAllBodiesToGpu();
+  broad_phase.writeAabbsToGpu();
+  std::cout << "Wrote data to GPU." << std::endl;
+
+  std::cout << "Simulating " << pipeline.getNumBodies() << " bodies."
+            << std::endl;
+  const double timestep = 0.01;
+
+  for (int istep = 0; istep < 100; ++istep)
+  {
+    narrow_phase.readbackAllBodiesToCpu();
+
+    b3Vector3 position;
+    b3Quaternion orientation;
+    if (!narrow_phase.getObjectTransformFromCpu(
+          position, orientation, pusher_shape))
+    {
+      std::cerr << "Failed getting pusher transform." << std::endl;
+      return 1;
+    }
+
+    std::cout << "position = "
+      << position[0] << " " << position[1] << " " << position[2] << std::endl;
+
+    pipeline.stepSimulation(timestep);
+  }
+
 
   return 0;
 }

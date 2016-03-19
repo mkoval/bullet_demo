@@ -12,6 +12,50 @@
 #include <Bullet3Collision/BroadPhaseCollision/b3DynamicBvhBroadphase.h>
 #include <Bullet3Collision/NarrowPhaseCollision/b3ConvexUtility.h>
 
+struct BodyIds
+{
+  int shape;
+  int physics;
+};
+
+BodyIds create_box(
+  b3GpuNarrowPhase& narrow_phase, b3GpuRigidBodyPipeline& pipeline,
+  const b3Vector3& origin, const b3Vector3& size, float mass,
+  const b3Vector3& position, const b3Quaternion& orientation,
+  int userdata)
+{
+  BodyIds ids;
+
+  const b3Vector3 s = 0.5 * size;
+  const std::vector<b3Vector3> vertices {
+    origin + b3MakeVector3(-s[0], -s[1], -s[2]),
+    origin + b3MakeVector3(-s[0], -s[1], +s[2]),
+    origin + b3MakeVector3(-s[0], +s[1], -s[2]),
+    origin + b3MakeVector3(-s[0], +s[1], +s[2]),
+    origin + b3MakeVector3(+s[0], -s[1], -s[2]),
+    origin + b3MakeVector3(+s[0], -s[1], +s[2]),
+    origin + b3MakeVector3(+s[0], +s[1], -s[2]),
+    origin + b3MakeVector3(+s[0], +s[1], +s[2])
+  };
+
+  std::unique_ptr<b3ConvexUtility> pusher_convex(new b3ConvexUtility);
+  if (!pusher_convex->initializePolyhedralFeatures(
+        vertices.data(), vertices.size()))
+    throw std::runtime_error("Failed creating polyhedron.");
+
+  ids.shape = narrow_phase.registerConvexHullShape(
+    pusher_convex.release());
+  if (ids.shape < 0)
+    throw std::runtime_error("Failed registering shape.");
+
+  ids.physics = pipeline.registerPhysicsInstance(
+    mass, position, orientation, ids.shape, userdata, false);
+  if (ids.physics < 0)
+    throw std::runtime_error("Failed registering physics instance.");
+
+  return ids;
+}
+
 int main(int argc, char** argv)
 {
 #if 0
@@ -94,51 +138,12 @@ int main(int argc, char** argv)
   b3GpuRigidBodyPipeline pipeline(context, device, queue, &narrow_phase,
     &broad_phase, &bvh_broad_phase, config);
   pipeline.setGravity(b3MakeVector3(0., 0., -9.81));
-
   std::cout << "Created b3GpuRigidBodyPipeline." << std::endl;
 
-  const std::vector<b3Vector3> pusher_vertices {
-    b3MakeVector3(-0.05, -0.3, -0.1),
-    b3MakeVector3(-0.05, -0.3, +0.1),
-    b3MakeVector3(-0.05, +0.3, -0.1),
-    b3MakeVector3(-0.05, +0.3, +0.1),
-    b3MakeVector3(+0.05, -0.3, -0.1),
-    b3MakeVector3(+0.05, -0.3, +0.1),
-    b3MakeVector3(+0.05, +0.3, -0.1),
-    b3MakeVector3(+0.05, +0.3, +0.1)
-  };
-  std::unique_ptr<b3ConvexUtility> pusher_convex(new b3ConvexUtility);
-  if (!pusher_convex->initializePolyhedralFeatures(
-        pusher_vertices.data(), pusher_vertices.size()))
-  {
-    std::cerr << "Failed creating pusher b3ConvexUtility." << std::endl;
-    return 1;
-  }
-  std::cout << "Created pusher b3ConvexUtility." << std::endl;
-
-  const int pusher_shape = narrow_phase.registerConvexHullShape(
-    pusher_convex.release());
-  if (pusher_shape < 0)
-  {
-    std::cerr << "Failed registering pusher shape." << std::endl;
-    return 1;
-  }
-  std::cout << "Registered pusher shape." << std::endl;
-
-  const float pusher_mass(1.f);
-  const int pusher_userdata = 1;
-  const b3Vector3 pusher_position = b3MakeVector3(0., 0., 0.05);
-  const b3Quaternion pusher_orientation(0., 0., 0., 1.);
-
-  const int pusher_physics = pipeline.registerPhysicsInstance(
-    pusher_mass, pusher_position, pusher_orientation, pusher_shape,
-    pusher_userdata, false);
-  if (pusher_physics < 0)
-  {
-    std::cerr << "Failed registering pusher physics interface." << std::endl;
-    return 1;
-  }
-  std::cout << "Registered pusher physics interface." << std::endl;
+  BodyIds pusher = create_box(narrow_phase, pipeline,
+    b3MakeVector3(0., 0., 0.), b3MakeVector3(0.1, 0.6, 0.2),
+    1., b3MakeVector3(0., 0., 0.05), b3Quaternion(0., 0., 0., 1.), 0);
+  std::cout << "Created pusher." << std::endl;
 
   pipeline.writeAllInstancesToGpu();
   narrow_phase.writeAllBodiesToGpu();
@@ -156,7 +161,7 @@ int main(int argc, char** argv)
     b3Vector3 position;
     b3Quaternion orientation;
     if (!narrow_phase.getObjectTransformFromCpu(
-          position, orientation, pusher_shape))
+          position, orientation, pusher.shape))
     {
       std::cerr << "Failed getting pusher transform." << std::endl;
       return 1;
